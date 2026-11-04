@@ -10,7 +10,7 @@ Plant:
 Watersystem: 
 
     Fields: 
-    - last_watering (time)
+    - watering_history(array of timestamps, maybe more infos, linke moinsturevalue)
 
     Functions: 
     - watering()
@@ -18,6 +18,16 @@ Watersystem:
         -> 
     - check_last_watering()
 
+Ideas watering():
+
+issues: 
+- sensor does not pick up the new watering right away -> time between watering
+- what if the sensor is not working properly? (failproof, should not water all the time in that case) ->stop programm, when strange value accures 
+- 
+
+
+- incemental: (1) check moist, if current_moisture<minimum_moisture, do 2. (2) : water a constant amout (small amout, so water will be recognized by the sensor)
+ 
 
 
 
