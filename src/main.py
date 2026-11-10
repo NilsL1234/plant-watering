@@ -15,6 +15,7 @@ class State(Enum):
     PAUSE = auto()
     ERROR = auto()
     END = auto()
+
 ##############################################################################################   
 @dataclass
 class ControllerData:
@@ -22,21 +23,16 @@ class ControllerData:
     last_pump_timestamp: float | None = None
     watering_cycle_timestamp: float | None = None
     pumps_in_cycle: int = 0
+
 ##############################################################################################
 # CONSTS
 
 MEASUREMENT_INTERVALL_SEC = 1
 MAX_MEASUREMENT_ERRORS = 3
 
-# PUMPING_DURATION_SEC = 540  # 9min
-# WATER_ABSORBTION_PERIOD_SEC = 5400 # 90min
-# WATERING_COOLDOWN_PERIOD_SEC = 86400 #24h
-
-# test:
-PUMPING_DURATION_SEC = 5 # 9min
-WATER_ABSORBTION_PERIOD_SEC = 30 # 90min
-WATERING_COOLDOWN_PERIOD_SEC = 120 #24h
-
+PUMPING_DURATION_SEC = 540  # 9min
+WATER_ABSORBTION_PERIOD_SEC = 5400 # 90min
+WATERING_COOLDOWN_PERIOD_SEC = 86400 #24h
 
 UPPER_THRESHOLD_MEASUREMENT = 950
 LOWER_THRESHOLD_MEASUREMENT = 600
@@ -48,18 +44,10 @@ MAX_SENSOR_VALUE_GAP = 100
 PUMP_PIN = 24
 CHANNEL_MCP = 0
 
-
 STATE_FILE_PATH = "data/state.json"
 
 ##############################################################################################
-# TEST VALUES
 
-test_values = iter([None, None, 940, 960, 650, 500])
-# test_values_error = iter([None, None, None])
-def measure_test():
-    return next(test_values, 500)
-
-##############################################################################################
 # FUNCTIONS
 
 def check_unusual_measurement_value(current_value):
@@ -114,13 +102,9 @@ def load_controller_data(data: ControllerData):
     data.pumps_in_cycle = state_data["pumps_in_cycle"]
     
 
-
-
-
 # handle_measurement_result:
 # - update state depending on timers and measurement_result
 # - check for repumps
-
 def handle_measurement_result(measurement_result: float, data: ControllerData):
 
     if data.pumps_in_cycle == 0:
@@ -194,7 +178,6 @@ def main():
     print("Init Pump...")
     GPIO.setup(PUMP_PIN, GPIO.OUT, initial=GPIO.LOW)
  
-
     # Loop that controlls the pump with different states. 
     # Each case of the current_state does something and then changes the current_state accordingly.
     # Then the loop starts again with the new state.
@@ -210,8 +193,7 @@ def main():
 
                 case State.MEASURING:
                     print("Measuring...")
-                    #current_measurement_value = measure(spi, CHANNEL_MCP)
-                    current_measurement_value = measure_test()
+                    current_measurement_value = measure(spi, CHANNEL_MCP)
                     print(f"Current measurement:  {current_measurement_value}")
                     # handle measurement errors
                     if current_measurement_value is None:
@@ -265,7 +247,6 @@ def main():
         GPIO.output(PUMP_PIN, GPIO.LOW)
         GPIO.cleanup()
         spi.close()
-
 
 if __name__ == "__main__":
     main()
