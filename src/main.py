@@ -4,6 +4,9 @@ import RPi.GPIO as GPIO
 from dataclasses import dataclass 
 import time
 import json
+import signal
+import os
+import logging
 
 ##############################################################################################
 # ENUMS
@@ -50,16 +53,6 @@ STATE_FILE_PATH = "data/state.json"
 
 # FUNCTIONS
 
-def check_unusual_measurement_value(current_value):
-    if current_value >= MAX_SENSOR_VALUE:
-        print(f"Error: Unsual high measure value: {current_value}")
-        return True
-    if current_value == MIN_SENSOR_VALUE:
-        print(f"Error: Unsual low measure value: {current_value}")
-        return True
-    return False
-
-    
 # Use spi to measure 5 times, once per second and get the average.
 # returns None, when there is a 0 or 1023 as value
 def measure(spi, channel):
@@ -87,9 +80,23 @@ def save_controller_data(data: ControllerData):
             "watering_cycle_timestamp": data.watering_cycle_timestamp,
             "pumps_in_cycle": data.pumps_in_cycle
             }
+    # temporary save of new data
+    temp_path = STATE_FILE_PATH + ".tmp"
 
-    with open(STATE_FILE_PATH, "w") as file:
+    # fill temp file and make sure its saved on sd lvl and not just in cache of programm or os
+    with open(temp_path, "w") as file:
         json.dump(state_data, file)
+        file.flush()
+        os.fsync(file.fileno())
+        
+    os.replace(temp_path, STATE_FILE_PATH)
+
+    #make sure replacement is on sd
+    directory_fd = os.open("data", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 # gets state_data from json file and inits ControllerData
 def load_controller_data(data: ControllerData):
@@ -110,6 +117,7 @@ def handle_measurement_result(measurement_result: float, data: ControllerData):
     if data.pumps_in_cycle == 0:
         if measurement_result > UPPER_THRESHOLD_MEASUREMENT:
             data.state = State.PUMPING
+            logging.info(f"Watering required. ADC: {measurement_result:.1f}")
         else: data.state = State.WAITING
   
     elif data.pumps_in_cycle == 1:
@@ -123,16 +131,13 @@ def handle_measurement_result(measurement_result: float, data: ControllerData):
         # not enough water
         if measurement_result > LOWER_THRESHOLD_MEASUREMENT:
             data.state = State.PUMPING
+            logging.info(f"Second watering required. ADC: {measurement_result:.1f}")
         else:
             # waiting state in case only 1 pump in cycle happens
-            remaining_sec = max(0, int(WATERING_COOLDOWN_PERIOD_SEC + PUMPING_DURATION_SEC - (time.time() - data.watering_cycle_timestamp)))
-            print(f"Watering cooldown active. Remaining: {remaining_sec // 3600} h {(remaining_sec % 3600) // 60} min {remaining_sec % 60} sec")
             data.state = State.WAITING
     
     elif data.pumps_in_cycle == 2:
         if (time.time() - data.watering_cycle_timestamp) < (WATERING_COOLDOWN_PERIOD_SEC + PUMPING_DURATION_SEC):
-            remaining_sec = max(0, int(WATERING_COOLDOWN_PERIOD_SEC + PUMPING_DURATION_SEC - (time.time() - data.watering_cycle_timestamp)))
-            print(f"Watering cooldown active. Remaining: {remaining_sec // 3600} h {(remaining_sec % 3600) // 60} min {remaining_sec % 60} sec")
             data.state = State.WAITING
         else:
             data.pumps_in_cycle = 0
@@ -141,20 +146,27 @@ def handle_measurement_result(measurement_result: float, data: ControllerData):
             data.state = State.WAITING
     
 def pumping():
-    print(f"Pumpe läuft für {PUMPING_DURATION_SEC} Sekunden")
     try:
         GPIO.output(PUMP_PIN, GPIO.HIGH)
         time.sleep(PUMPING_DURATION_SEC)
     finally:
         GPIO.output(PUMP_PIN, GPIO.LOW)
-    print("Ende des Pumpdurchgangs...")
+    logging.info("Pump finished")
+
+# 
+def handle_sigterm(signum, frame):
+    raise SystemExit(0)
 
 ##############################################################################################
 
 def main():
 
+    #init logging
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    last_measurement_log = 0
+
     # init controller
-    print("Init Controller...")
+    logging.info("Controller started")
     data = ControllerData()
     try:
         load_controller_data(data)
@@ -175,8 +187,10 @@ def main():
     spi.max_speed_hz = 100_000
 
     GPIO.setmode(GPIO.BCM)
-    print("Init Pump...")
     GPIO.setup(PUMP_PIN, GPIO.OUT, initial=GPIO.LOW)
+
+    # making sure pump gets stopped, when programm end via systemd 
+    signal.signal(signal.SIGTERM, handle_sigterm)
  
     # Loop that controlls the pump with different states. 
     # Each case of the current_state does something and then changes the current_state accordingly.
@@ -186,28 +200,32 @@ def main():
 
             match data.state:
                 case State.WAITING:
-                    print(f"Waiting {MEASUREMENT_INTERVALL_SEC} sec. ...")
                     time.sleep(MEASUREMENT_INTERVALL_SEC)
                     data.state = State.MEASURING
                     continue
 
                 case State.MEASURING:
-                    print("Measuring...")
                     current_measurement_value = measure(spi, CHANNEL_MCP)
-                    print(f"Current measurement:  {current_measurement_value}")
                     # handle measurement errors
                     if current_measurement_value is None:
                         measurement_errors += 1
+                        logging.warning(f"Invalid measurement ({measurement_errors}/{MAX_MEASUREMENT_ERRORS})")
                         if measurement_errors >= MAX_MEASUREMENT_ERRORS:
                             data.state = State.ERROR
+
                         continue
                     measurement_errors = 0
+
+                    #log value every 30min
+                    if time.time() - last_measurement_log >= 1800:
+                        logging.info(f"Soil moisture ADC: {current_measurement_value:.1f}")
+                        last_measurement_log = time.time()
+
                     # update current state depending on measurement result and active timers
                     handle_measurement_result(current_measurement_value, data)
                     continue
 
                 case State.PUMPING:
-                    print(f"Pumping for {PUMPING_DURATION_SEC} sec. ...")
                     data.pumps_in_cycle += 1
                     data.last_pump_timestamp = time.time()
                     if data.pumps_in_cycle == 1:
@@ -217,8 +235,14 @@ def main():
                         data.watering_cycle_timestamp = time.time()
                         data.state = State.WAITING
                     else:
-                        data.state = State.ERROR # maybe different error handling
+                        data.state = State.ERROR
                         continue
+                    logging.info(f"Pump started. Duration: {PUMPING_DURATION_SEC} sec")
+                    if data.pumps_in_cycle == 1:
+                        logging.info("Absorption pause active")
+                    elif data.pumps_in_cycle == 2:
+                        logging.info("Watering cooldown active")
+
                     save_controller_data(data)
                     pumping()
                         
@@ -227,21 +251,19 @@ def main():
                     if (time.time() - data.last_pump_timestamp) >= (WATER_ABSORBTION_PERIOD_SEC + PUMPING_DURATION_SEC):
                         data.state = State.MEASURING
                     else:
-                        remaining_sec = max(0, int(WATER_ABSORBTION_PERIOD_SEC + PUMPING_DURATION_SEC - (time.time() - data.last_pump_timestamp)))
-                        print(f"Absorption pause active. Remaining: {remaining_sec // 60} min {remaining_sec % 60} sec") 
                         time.sleep(10)
                     continue
 
                 case State.END:
-                    print("programm ends now...")
+                    logging.info("Program ended")
                     break
 
-                case State.ERROR: 
-                    print("Error: Measurement failed multiple times")
+                case State.ERROR:
+                    logging.error("Measurement failed three times in a row")
                     break
 
     except KeyboardInterrupt:
-        print("Manueller Abbruch")
+        logging.info("Manual interrupt")
 
     finally:
         GPIO.output(PUMP_PIN, GPIO.LOW)
