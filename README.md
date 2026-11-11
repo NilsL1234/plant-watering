@@ -52,7 +52,9 @@ The `measure()` function reads five sensor values via SPI and calculates their a
 
 The `ControllerData` class stores the current state, timestamps and pump counter. Relevant data is saved in a JSON file to preserve it across program restarts.
 
-The following UML diagram shows the states and their transitions.
+The following UML diagram shows the states and their transitions:
+
+![Watering State Machine](docs/images/plant_watering_state_maschine.drawio.svg)
 
 
 ## 5. Watering Logic & Calibration
@@ -77,33 +79,84 @@ The threshold values are based on initial measurements and may need further cali
 
 ## 6. Installation & Setup
 
-The project runs on Raspberry Pi OS using Python 3.
+The project runs on a Raspberry Pi 5 with Raspberry Pi OS and Python 3.11 or newer.
 
-SPI must be enabled on the Raspberry Pi. The Python dependencies include `spidev` and `RPi.GPIO`.
+First, enable SPI using `sudo raspi-config` under `Interface Options → SPI`.
 
-The program can be started from the project directory using:
+Install the required tools:
+
+```bash
+sudo apt update
+sudo apt install git python3-venv
+```
+
+Clone the repository:
+
+```bash
+git clone https://github.com/NilsL1234/plant-watering.git
+cd plant-watering
+```
+
+Create a virtual environment and install the Python dependencies:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
+```
+
+Start the program from the project directory:
 
 ```bash
 .venv/bin/python src/main.py
 ```
 
-The `data/` directory must exist to store the controller state.
+The soil moisture thresholds may need adjustment depending on the sensor and soil conditions.
 
 ## 7. Automatic Startup (systemd)
 
 The program can be configured as a systemd service to start automatically when the Raspberry Pi boots.
 
-The service runs the Python script using the virtual environment and the project directory as its working directory.
+Create the service file:
+
+```bash
+sudo nano /etc/systemd/system/plant-watering.service
+```
+
+Add the following configuration. Replace `<username>` and adjust the project path if necessary.
+
+```ini
+[Unit]
+Description=Plant Watering Controller
+
+[Service]
+Type=simple
+User=<username>
+WorkingDirectory=/home/<username>/plant-watering
+ExecStart=/home/<username>/plant-watering/.venv/bin/python src/main.py
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Reload systemd and enable automatic startup:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now plant-watering.service
+```
 
 Useful commands:
 
 ```bash
-sudo systemctl enable plant-watering.service
 sudo systemctl start plant-watering.service
 sudo systemctl stop plant-watering.service
+sudo systemctl restart plant-watering.service
 systemctl status plant-watering.service
 journalctl -u plant-watering.service -f
 ```
+
+The service uses the project's virtual environment and working directory. Logs can be viewed using `journalctl`.
 
 ## 8. Error Handling & Safety
 
@@ -135,7 +188,7 @@ plant-watering/
 ├── src/
 │   └── main.py
 ├── data/
-│   └── state.json
+│   └── .gitkeep
 ├── docs/
 │   └── images/
 └── README.md
