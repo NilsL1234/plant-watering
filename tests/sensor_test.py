@@ -7,7 +7,7 @@ spi = SpiDev()
 # The MCP3008 is on the first bus and is the first chip (0,0). 
 spi.open(0,0)
 
-spi.max_speed_hz = 1_000_000
+spi.max_speed_hz = 100_000
 
 channel_mcp = 0
 
@@ -22,10 +22,11 @@ def read_channel(spi, channel):
     # 
     request = [1, (8 + channel) << 4, 0]
     response = spi.xfer2(request)
-    value = ((response[1] & 3)<< 8) | response[2] 
+    value = ((response[1] & 3)<< 8) | response[2]
+    print(response) 
     return value
 
-for i in range(3):
+for i in range(1000):
     result = read_channel(spi, channel_mcp)
     print(f"Das Ergebnis der Messung {i+1} beträgt:  {result}")
     time.sleep(1)

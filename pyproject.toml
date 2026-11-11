@@ -5,6 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "plant-watering"
 version = "0.1.0"
+dependencies = [
+    "spidev==3.8",
+    "rpi-lgpio==0.6"
+]
 description = "Software for a Raspberry Pi plant watering system"
 readme = "README.md"
 requires-python = ">=3.11"

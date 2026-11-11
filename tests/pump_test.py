@@ -2,7 +2,7 @@ import time
 import RPi.GPIO as GPIO
 
 PUMP_PIN = 24
-PUMP_DURATION = 50
+PUMP_DURATION = 240
 
 GPIO.setmode(GPIO.BCM)
 print("Start:")
